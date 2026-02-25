@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* Base dark theme */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #030712;
+  color: #e5e7eb;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #1f2937;
+  border-radius: 3px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #2563eb;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+/* Touch targets for mobile */
+@media (max-width: 640px) {
+  input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Safe area for mobile devices with notch */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Disable pull-to-refresh on mobile */
+html {
+  overscroll-behavior: none;
+}
+
+/* Time input styling for dark mode */
+input[type="time"] {
+  color-scheme: dark;
+}
+
+/* Select styling for dark mode */
+select {
+  color-scheme: dark;
+}
+
+/* Hide scrollbar for scroll pickers */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Timeline bar: prevent scroll/zoom during drag */
+.timeline-bar {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
