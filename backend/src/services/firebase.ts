@@ -20,6 +20,10 @@ export function initializeFirebase(): void {
     // Priority 1: JSON string from env var (for Railway / cloud deploys)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      // Ensure private_key newlines are actual newlines (env vars may escape them)
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      }
       console.log('Using FIREBASE_SERVICE_ACCOUNT env var');
     } else {
       // Priority 2: File on disk (local development)

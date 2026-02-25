@@ -17,9 +17,18 @@ const PORT = process.env.PORT || 3005;
 initializeFirebase();
 
 // Middleware - CORS
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map(u => u.trim())
+  : [];
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? process.env.FRONTEND_URL
+    ? (origin, cb) => {
+        if (!origin || allowedOrigins.some(o => origin === o || origin.endsWith('.vercel.app'))) {
+          cb(null, true);
+        } else {
+          cb(new Error('CORS'));
+        }
+      }
     : true,
   credentials: true
 }));
