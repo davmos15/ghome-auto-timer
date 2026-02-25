@@ -114,7 +114,8 @@ export type DeviceCommand =
   | { type: 'Thermostat'; mode: string; temperature?: number }
   | { type: 'FanSpeed'; speedPercent: number }
   | { type: 'TuyaAC'; mode: TuyaACMode; temperature: number; fan: TuyaACFan }
-  | { type: 'TuyaLight'; brightness?: number; colorTemp?: number; colorHSV?: { h: number; s: number; v: number }; workMode?: 'white' | 'colour' };
+  | { type: 'TuyaLight'; brightness?: number; colorTemp?: number; colorHSV?: { h: number; s: number; v: number }; workMode?: 'white' | 'colour' }
+  | { type: 'GradualBrightness'; targetBrightness: number; durationMinutes: number };
 
 export interface ActionCondition {
   sensorDeviceId: string;

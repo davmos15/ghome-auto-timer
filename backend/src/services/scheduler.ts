@@ -5,6 +5,9 @@ import type { Schedule, TimeSlot, DayOfWeek, DeviceCommand, ActionCondition } fr
 // Track last execution to prevent duplicate runs
 const lastExecutionTimes: Map<string, number> = new Map();
 
+// Active gradual transitions (deviceId → interval timer)
+const activeTransitions: Map<string, NodeJS.Timeout> = new Map();
+
 // Day mapping
 const DAY_MAP: Record<number, DayOfWeek> = {
   0: 'sunday',
@@ -131,6 +134,9 @@ function convertToTuyaCommands(command: DeviceCommand, deviceCategory?: string):
       else if (command.speedPercent > 33) speed = 'mid';
       return [{ code: 'fan', value: speed }];
     }
+    case 'GradualBrightness':
+      // Handled specially in executeTimeSlot via startGradualTransition
+      return [];
     default:
       console.warn('[Scheduler] Unknown command type:', (command as any).type);
       return [];
@@ -213,6 +219,83 @@ async function checkCondition(condition: ActionCondition): Promise<boolean> {
 }
 
 /**
+ * Cancel any active gradual transition for a device
+ */
+function cancelTransition(deviceId: string): void {
+  const existing = activeTransitions.get(deviceId);
+  if (existing) {
+    clearInterval(existing);
+    activeTransitions.delete(deviceId);
+    console.log(`[Scheduler]   Cancelled active gradual transition for ${deviceId}`);
+  }
+}
+
+/**
+ * Start a gradual brightness transition (stepped every 30s)
+ */
+async function startGradualTransition(
+  deviceId: string,
+  deviceName: string,
+  targetBrightness: number,
+  durationMinutes: number
+): Promise<void> {
+  cancelTransition(deviceId);
+
+  // Try to read current brightness
+  let currentBright = targetBrightness > 50 ? 0 : 100;
+  try {
+    const status = await getDeviceStatus(deviceId);
+    if (status.success && status.status) {
+      const raw = status.status.bright_value_v2;
+      if (raw != null) {
+        currentBright = Math.round(Number(raw) / 10);
+      }
+    }
+  } catch {
+    // Use default
+  }
+
+  const totalSteps = Math.max(1, durationMinutes * 2);
+  const stepSize = (targetBrightness - currentBright) / totalSteps;
+  let step = 0;
+
+  console.log(`[Scheduler]   Starting gradual: ${currentBright}% → ${targetBrightness}% over ${durationMinutes}m (${totalSteps} steps)`);
+
+  // Send first step immediately
+  step++;
+  const firstBright = Math.round(currentBright + stepSize * step);
+  const firstTuya = Math.max(10, Math.round(firstBright * 10));
+  await sendCommand(deviceId, [
+    { code: 'switch_led', value: true },
+    { code: 'bright_value_v2', value: firstTuya },
+  ]);
+
+  if (totalSteps <= 1) return;
+
+  const interval = setInterval(async () => {
+    step++;
+    const brightness = Math.round(currentBright + stepSize * step);
+    const tuyaBright = Math.max(10, Math.round(brightness * 10));
+
+    console.log(`[Scheduler]   Gradual step ${step}/${totalSteps} for ${deviceName}: ${brightness}%`);
+
+    try {
+      await sendCommand(deviceId, [{ code: 'bright_value_v2', value: tuyaBright }]);
+    } catch (err) {
+      console.error(`[Scheduler]   Gradual step failed for ${deviceName}:`, err);
+    }
+
+    if (step >= totalSteps) {
+      clearInterval(interval);
+      activeTransitions.delete(deviceId);
+      console.log(`[Scheduler]   Gradual transition complete for ${deviceName}`);
+    }
+  }, 30_000);
+
+  activeTransitions.set(deviceId, interval);
+}
+
+/**
  * Execute actions for a time slot
  */
 async function executeTimeSlot(
@@ -236,7 +319,21 @@ async function executeTimeSlot(
         console.log(`[Scheduler]   - Condition met for ${action.deviceName}`);
       }
 
+      // Cancel any active gradual transition for this device before sending new commands
+      cancelTransition(action.deviceId);
+
       console.log(`[Scheduler]   - Executing action on ${action.deviceName}:`, action.command);
+
+      // Handle GradualBrightness specially
+      if (action.command.type === 'GradualBrightness') {
+        await startGradualTransition(
+          action.deviceId,
+          action.deviceName,
+          action.command.targetBrightness,
+          action.command.durationMinutes
+        );
+        continue;
+      }
 
       // Convert our command to Tuya format
       const tuyaCommands = convertToTuyaCommands(action.command, action.deviceCategory);

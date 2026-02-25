@@ -13,6 +13,8 @@ import {
   Loader2,
   X,
   Layers,
+  Copy,
+  Clock,
 } from 'lucide-react';
 import { scheduleApi, tuyaApi, groupApi } from '../lib/api';
 import type { Schedule, TimeSlot, DayOfWeek, Device, DeviceCommand, DeviceGroup, ActionCondition } from '../types';
@@ -46,6 +48,7 @@ interface DeviceTimeline {
   deviceName: string;
   device?: Device;
   events: TimelineEvent[];
+  groupId?: string;
 }
 
 interface Segment {
@@ -294,8 +297,8 @@ function EventPopover({ event, device, allDevices, onUpdate, onDelete, onClose }
             >Turn OFF</button>
           </div>
 
-          {/* Extra command (for ON events on devices with traits) */}
-          {event.on && device && (
+          {/* Command settings (for all events on devices with traits) */}
+          {device && (
             <ExtraCommandEditor
               command={event.command}
               condition={event.condition}
@@ -312,6 +315,102 @@ function EventPopover({ event, device, allDevices, onUpdate, onDelete, onClose }
             className="w-full py-2 text-sm text-red-400 hover:text-red-300 border border-red-900/50 rounded-lg hover:bg-red-900/20 transition-colors"
           >
             Delete event
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Event Sheet ─────────────────────────────────────────────────
+function AddEventSheet({ device, allDevices, onAdd, onClose }: {
+  device?: Device;
+  allDevices: Device[];
+  onAdd: (event: TimelineEvent) => void;
+  onClose: () => void;
+}) {
+  const nowH = new Date().getHours();
+  const nowM = snapToGrid(new Date().getMinutes());
+  const defaultTime = minutesToTime(nowH * 60 + nowM);
+
+  const [time, setTime] = useState(defaultTime);
+  const [on, setOn] = useState(true);
+  const [command, setCommand] = useState<DeviceCommand>({ type: 'OnOff', on: true });
+  const [condition, setCondition] = useState<ActionCondition | undefined>(undefined);
+
+  const nudge = (delta: number) => {
+    const m = timeToMinutes(time) + delta;
+    setTime(minutesToTime(m));
+  };
+
+  const handleConfirm = () => {
+    onAdd({
+      id: uid(),
+      time,
+      on,
+      command,
+      condition,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-gray-900 border border-gray-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-sm max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-3 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-blue-400" />
+            <span className="text-sm font-medium text-gray-200">Add Event</span>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-gray-300">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* Time picker */}
+          <div className="flex items-center justify-center gap-3">
+            <button onClick={() => nudge(-30)} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 hover:text-white">-30m</button>
+            <button onClick={() => nudge(-5)} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 hover:text-white">-5m</button>
+            <span className="text-2xl font-mono text-white px-3">{time}</span>
+            <button onClick={() => nudge(5)} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 hover:text-white">+5m</button>
+            <button onClick={() => nudge(30)} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 hover:text-white">+30m</button>
+          </div>
+
+          {/* On/Off toggle */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setOn(true); setCommand({ type: 'OnOff', on: true }); }}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-95 ${
+                on ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-500 border border-gray-700'
+              }`}
+            >Turn ON</button>
+            <button
+              onClick={() => { setOn(false); setCommand({ type: 'OnOff', on: false }); }}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-95 ${
+                !on ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-500 border border-gray-700'
+              }`}
+            >Turn OFF</button>
+          </div>
+
+          {/* Command editor */}
+          {device && (
+            <ExtraCommandEditor
+              command={command}
+              condition={condition}
+              device={device}
+              allDevices={allDevices}
+              onUpdate={(cmd) => setCommand(cmd)}
+              onConditionUpdate={(cond) => setCondition(cond)}
+            />
+          )}
+
+          {/* Confirm */}
+          <button
+            onClick={handleConfirm}
+            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 active:scale-95 transition-all"
+          >
+            Add Event
           </button>
         </div>
       </div>
@@ -428,99 +527,145 @@ function ExtraCommandEditor({ command, condition, device, allDevices, onUpdate, 
     );
   }
 
-  // ─── Light Controls ──────────────────────────
+  // ─── Light Controls (all simultaneous) ─────────
   if (isLight) {
     const hasColor = device.traits.some(t => t.includes('ColorSetting'));
 
-    // Build command type options
-    const options: { value: string; label: string }[] = [
-      { value: 'OnOff', label: 'Just On/Off' },
-      { value: 'TuyaLight-brightness', label: 'Set Brightness' },
-      { value: 'TuyaLight-colorTemp', label: 'Color Temperature' },
-    ];
-    if (hasColor) {
-      options.push({ value: 'TuyaLight-color', label: 'Color' });
+    // Ensure we're working with a TuyaLight command, auto-upgrade if needed
+    const lightCmd = command.type === 'TuyaLight'
+      ? command
+      : command.type === 'GradualBrightness'
+        ? command // keep gradual as-is
+        : { type: 'TuyaLight' as const, brightness: 80, colorTemp: 500, workMode: 'white' as const };
+
+    // Auto-switch to TuyaLight if currently OnOff/Brightness/etc
+    if (command.type !== 'TuyaLight' && command.type !== 'GradualBrightness') {
+      onUpdate(lightCmd);
     }
 
-    // Determine current selection
-    let currentOption = 'OnOff';
-    if (command.type === 'TuyaLight') {
-      if (command.colorHSV) currentOption = 'TuyaLight-color';
-      else if (command.colorTemp != null) currentOption = 'TuyaLight-colorTemp';
-      else if (command.brightness != null) currentOption = 'TuyaLight-brightness';
-    } else if (command.type === 'Brightness') currentOption = 'TuyaLight-brightness';
-    else if (command.type === 'ColorTemperature') currentOption = 'TuyaLight-colorTemp';
-    else if (command.type === 'ColorRGB') currentOption = 'TuyaLight-color';
+    const isGradual = command.type === 'GradualBrightness';
+    const isColorMode = command.type === 'TuyaLight' && !!command.colorHSV;
 
     return (
       <div className="space-y-3">
-        <select
-          value={currentOption}
-          onChange={(e) => {
-            const t = e.target.value;
-            switch (t) {
-              case 'OnOff': onUpdate({ type: 'OnOff', on: true }); break;
-              case 'TuyaLight-brightness': onUpdate({ type: 'TuyaLight', brightness: 80, workMode: 'white' }); break;
-              case 'TuyaLight-colorTemp': onUpdate({ type: 'TuyaLight', colorTemp: 500, workMode: 'white' }); break;
-              case 'TuyaLight-color': onUpdate({ type: 'TuyaLight', colorHSV: { h: 0, s: 1000, v: 1000 }, workMode: 'colour' }); break;
-            }
-          }}
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200"
-        >
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        {/* Gradual transition toggle */}
+        <div className="flex items-center justify-between p-2 bg-gray-800/40 border border-gray-700 rounded-lg">
+          <span className="text-xs text-gray-400">Gradual transition</span>
+          <button
+            onClick={() => {
+              if (isGradual) {
+                onUpdate({ type: 'TuyaLight', brightness: (command as any).targetBrightness || 80, colorTemp: 500, workMode: 'white' });
+              } else {
+                const currentBright = command.type === 'TuyaLight' && command.brightness != null ? command.brightness : 80;
+                onUpdate({ type: 'GradualBrightness', targetBrightness: currentBright, durationMinutes: 15 });
+              }
+            }}
+            className={`w-9 h-5 rounded-full transition-colors relative ${isGradual ? 'bg-amber-600' : 'bg-gray-700'}`}
+          >
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+              isGradual ? 'translate-x-4' : 'translate-x-0.5'
+            }`} />
+          </button>
+        </div>
 
-        {/* Brightness slider */}
-        {command.type === 'TuyaLight' && command.brightness != null && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs text-gray-400">
-              <span>Brightness</span><span>{command.brightness}%</span>
+        {isGradual ? (
+          <>
+            {/* Gradual: target brightness */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>Target Brightness</span><span>{(command as any).targetBrightness}%</span>
+              </div>
+              <input type="range" min="1" max="100" value={(command as any).targetBrightness}
+                onChange={e => onUpdate({ type: 'GradualBrightness', targetBrightness: parseInt(e.target.value), durationMinutes: (command as any).durationMinutes })}
+                className="w-full" />
             </div>
-            <input type="range" min="1" max="100" value={command.brightness}
-              onChange={e => onUpdate({ type: 'TuyaLight', brightness: parseInt(e.target.value), workMode: 'white' })}
-              className="w-full" />
-          </div>
-        )}
-
-        {/* Color temperature slider */}
-        {command.type === 'TuyaLight' && command.colorTemp != null && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs text-gray-400">
-              <span>Color Temp</span><span>{command.colorTemp}</span>
+            {/* Gradual: duration */}
+            <div className="space-y-1.5">
+              <span className="text-xs text-gray-500">Duration</span>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[5, 10, 15, 30].map(mins => (
+                  <button
+                    key={mins}
+                    onClick={() => onUpdate({ type: 'GradualBrightness', targetBrightness: (command as any).targetBrightness, durationMinutes: mins })}
+                    className={`py-2 rounded-lg text-xs font-medium transition-all active:scale-95 ${
+                      (command as any).durationMinutes === mins ? 'bg-amber-600 text-white' : 'bg-gray-800 text-gray-500 border border-gray-700'
+                    }`}
+                  >{mins}m</button>
+                ))}
+              </div>
             </div>
-            <input type="range" min="0" max="1000" step="10" value={command.colorTemp}
-              onChange={e => onUpdate({ type: 'TuyaLight', colorTemp: parseInt(e.target.value), workMode: 'white' })}
-              className="w-full" />
-            <div className="flex justify-between text-[10px] text-gray-600"><span>Warm</span><span>Cool</span></div>
-          </div>
-        )}
+          </>
+        ) : command.type === 'TuyaLight' ? (
+          <>
+            {/* Brightness slider (always shown) */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>Brightness</span><span>{command.brightness ?? 80}%</span>
+              </div>
+              <input type="range" min="1" max="100" value={command.brightness ?? 80}
+                onChange={e => {
+                  const b = parseInt(e.target.value);
+                  if (isColorMode) {
+                    onUpdate({ ...command, brightness: b });
+                  } else {
+                    onUpdate({ ...command, brightness: b, workMode: 'white', colorHSV: undefined });
+                  }
+                }}
+                className="w-full" />
+            </div>
 
-        {/* Color presets */}
-        {command.type === 'TuyaLight' && command.colorHSV && (
-          <div className="grid grid-cols-3 gap-1.5">
-            {PRESET_COLORS.map(color => {
-              const hsv = rgbToHsv(color.r, color.g, color.b);
-              const selected = command.colorHSV && command.colorHSV.h === hsv.h && command.colorHSV.s === hsv.s;
-              return (
-                <button key={color.name}
-                  onClick={() => onUpdate({ type: 'TuyaLight', colorHSV: hsv, workMode: 'colour' })}
-                  className={`flex items-center gap-1.5 p-2 rounded-lg border transition-colors ${
-                    selected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700'
-                  }`}>
-                  <span className="w-3 h-3 rounded-full border border-gray-600"
-                    style={{ backgroundColor: `rgb(${color.r},${color.g},${color.b})` }} />
-                  <span className="text-[11px] text-gray-400">{color.name}</span>
-                </button>
-              );
-            })}
-            <button
-              onClick={() => onUpdate({ type: 'TuyaLight', workMode: 'white' as const, brightness: 80 })}
-              className="flex items-center gap-1.5 p-2 rounded-lg border border-gray-700 col-span-3 hover:border-gray-500"
-            >
-              <span className="w-3 h-3 rounded-full bg-white border border-gray-300" />
-              <span className="text-[11px] text-gray-400">White Mode</span>
-            </button>
-          </div>
+            {/* Color temperature slider (shown in white mode) */}
+            {!isColorMode && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>Color Temp</span><span>{command.colorTemp ?? 500}</span>
+                </div>
+                <input type="range" min="0" max="1000" step="10" value={command.colorTemp ?? 500}
+                  onChange={e => onUpdate({ ...command, colorTemp: parseInt(e.target.value), workMode: 'white', colorHSV: undefined })}
+                  className="w-full" />
+                <div className="flex justify-between text-[10px] text-gray-600"><span>Warm</span><span>Cool</span></div>
+              </div>
+            )}
+
+            {/* Color presets (if device supports color) */}
+            {hasColor && (
+              <div className="grid grid-cols-3 gap-1.5">
+                {PRESET_COLORS.map(color => {
+                  const hsv = rgbToHsv(color.r, color.g, color.b);
+                  const selected = isColorMode && command.colorHSV && command.colorHSV.h === hsv.h && command.colorHSV.s === hsv.s;
+                  return (
+                    <button key={color.name}
+                      onClick={() => onUpdate({ type: 'TuyaLight', colorHSV: hsv, brightness: command.brightness ?? 80, workMode: 'colour' })}
+                      className={`flex items-center gap-1.5 p-2 rounded-lg border transition-colors ${
+                        selected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700'
+                      }`}>
+                      <span className="w-3 h-3 rounded-full border border-gray-600"
+                        style={{ backgroundColor: `rgb(${color.r},${color.g},${color.b})` }} />
+                      <span className="text-[11px] text-gray-400">{color.name}</span>
+                    </button>
+                  );
+                })}
+                {isColorMode && (
+                  <button
+                    onClick={() => onUpdate({ type: 'TuyaLight', brightness: command.brightness ?? 80, colorTemp: 500, workMode: 'white' })}
+                    className="flex items-center gap-1.5 p-2 rounded-lg border border-gray-700 col-span-3 hover:border-gray-500"
+                  >
+                    <span className="w-3 h-3 rounded-full bg-white border border-gray-300" />
+                    <span className="text-[11px] text-gray-400">White Mode</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : null}
+
+        {/* Condition (for non-gradual) */}
+        {!isGradual && sensorDevices.length > 0 && (
+          <ConditionEditor
+            condition={condition}
+            sensorDevices={sensorDevices}
+            onUpdate={onConditionUpdate}
+          />
         )}
       </div>
     );
@@ -679,16 +824,63 @@ function ConditionEditor({ condition, sensorDevices, onUpdate }: {
   );
 }
 
+// ─── Event chip label helper ─────────────────────────────────────────
+function getEventLabel(ev: TimelineEvent): string {
+  const cmd = ev.command;
+  switch (cmd.type) {
+    case 'OnOff':
+      return cmd.on ? 'ON' : 'OFF';
+    case 'TuyaLight': {
+      const parts: string[] = [];
+      if (cmd.colorHSV) parts.push('Color');
+      else {
+        if (cmd.brightness != null) parts.push(`${cmd.brightness}%`);
+        if (cmd.colorTemp != null) parts.push('CT');
+      }
+      return parts.length > 0 ? parts.join(' ') : 'Light';
+    }
+    case 'TuyaAC':
+      return `${cmd.temperature}° ${cmd.mode}`;
+    case 'GradualBrightness':
+      return `~${cmd.targetBrightness}% ${cmd.durationMinutes}m`;
+    case 'Brightness':
+      return `${cmd.brightness}%`;
+    default:
+      return ev.on ? 'ON' : 'OFF';
+  }
+}
+
+function getEventColor(ev: TimelineEvent): { bg: string; border: string; text: string; dot: string; line: string; knob: string } {
+  if (ev.command.type === 'GradualBrightness') {
+    return {
+      bg: 'bg-amber-950/40', border: 'border-amber-800/50', text: 'text-amber-400',
+      dot: 'bg-amber-400', line: 'bg-amber-400', knob: 'bg-amber-500 border-amber-300',
+    };
+  }
+  if (ev.on) {
+    return {
+      bg: 'bg-emerald-950/40', border: 'border-emerald-800/50', text: 'text-emerald-400',
+      dot: 'bg-emerald-400', line: 'bg-emerald-400', knob: 'bg-emerald-500 border-emerald-300',
+    };
+  }
+  return {
+    bg: 'bg-red-950/40', border: 'border-red-800/50', text: 'text-red-400',
+    dot: 'bg-red-400', line: 'bg-red-400', knob: 'bg-red-500 border-red-300',
+  };
+}
+
 // ─── Device Timeline Row ─────────────────────────────────────────────
-function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
+function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete, onSync }: {
   timeline: DeviceTimeline;
   allDevices: Device[];
   onUpdate: (updated: DeviceTimeline) => void;
   onDelete: () => void;
+  onSync?: () => void;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [popoverEvent, setPopoverEvent] = useState<TimelineEvent | null>(null);
+  const [showAddEvent, setShowAddEvent] = useState(false);
   const dragStartX = useRef(0);
   const wasDragged = useRef(false);
 
@@ -726,7 +918,6 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (draggingId) {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-      // If it wasn't a drag, open the popover
       if (!wasDragged.current) {
         const ev = timeline.events.find(ev => ev.id === draggingId);
         if (ev) setPopoverEvent(ev);
@@ -734,29 +925,6 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
       setDraggingId(null);
     }
   }, [draggingId, timeline.events]);
-
-  const handleBarClick = useCallback((e: React.PointerEvent) => {
-    if (draggingId) return;
-    // Make sure we clicked the bar, not a marker
-    if ((e.target as HTMLElement).closest('[data-marker]')) return;
-    const minutes = posFromPointer(e.clientX);
-    const time = minutesToTime(minutes);
-    // Determine on/off: opposite of whatever state is at this time
-    const sorted = [...timeline.events].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-    let currentState = sorted.length > 0 ? sorted[sorted.length - 1].on : false;
-    for (const ev of sorted) {
-      if (timeToMinutes(ev.time) > minutes) break;
-      currentState = ev.on;
-    }
-    const newOn = !currentState;
-    const newEvent: TimelineEvent = {
-      id: uid(),
-      time,
-      on: newOn,
-      command: { type: 'OnOff', on: newOn },
-    };
-    onUpdate({ ...timeline, events: [...timeline.events, newEvent] });
-  }, [draggingId, timeline, onUpdate, posFromPointer]);
 
   const updateEvent = (eventId: string, updates: Partial<TimelineEvent>) => {
     const updatedEvents = timeline.events.map(ev =>
@@ -773,13 +941,18 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
     setPopoverEvent(null);
   };
 
+  const addNewEvent = (event: TimelineEvent) => {
+    onUpdate({ ...timeline, events: [...timeline.events, event] });
+    setShowAddEvent(false);
+  };
+
   // Current time indicator
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const nowPct = (nowMin / MINUTES_IN_DAY) * 100;
 
   return (
-    <div className="space-y-1">
+    <div className={`space-y-1 ${timeline.groupId ? 'pl-2 border-l-2 border-purple-800/50' : ''}`}>
       {/* Device label */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -793,16 +966,27 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
             {timeline.events.length} event{timeline.events.length !== 1 ? 's' : ''}
           </span>
         </div>
-        <button onClick={onDelete} className="p-1 text-gray-700 hover:text-red-500 transition-colors">
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onSync && (
+            <button
+              onClick={onSync}
+              className="flex items-center gap-1 px-2 py-1 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20 rounded transition-colors"
+              title="Copy this device's events to all other devices in the group"
+            >
+              <Copy className="h-3 w-3" />
+              <span className="text-[10px]">Sync</span>
+            </button>
+          )}
+          <button onClick={onDelete} className="p-1 text-gray-700 hover:text-red-500 transition-colors">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Timeline bar */}
       <div
         ref={barRef}
-        className="timeline-bar relative h-12 bg-gray-900/80 rounded-lg border border-gray-800 cursor-crosshair overflow-hidden"
-        onPointerDown={handleBarClick}
+        className="timeline-bar relative h-12 bg-gray-900/80 rounded-lg border border-gray-800 overflow-hidden"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
@@ -834,6 +1018,7 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
         {/* Event markers */}
         {timeline.events.map(ev => {
           const leftPct = (timeToMinutes(ev.time) / MINUTES_IN_DAY) * 100;
+          const colors = getEventColor(ev);
           return (
             <div
               key={ev.id}
@@ -842,20 +1027,9 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
               style={{ left: `${leftPct}%`, transform: 'translateX(-50%)', width: '28px' }}
               onPointerDown={(e) => handlePointerDown(e, ev.id)}
             >
-              {/* Visual line */}
-              <div className={`absolute top-0 bottom-0 w-0.5 ${
-                ev.on ? 'bg-emerald-400' : 'bg-red-400'
-              }`} />
-              {/* Knob */}
-              <div className={`relative z-10 w-4 h-4 rounded-full border-2 shadow-lg ${
-                ev.on
-                  ? 'bg-emerald-500 border-emerald-300'
-                  : 'bg-red-500 border-red-300'
-              } ${draggingId === ev.id ? 'scale-125' : ''} transition-transform`} />
-              {/* Time label */}
-              <span className={`absolute -bottom-0.5 text-[8px] font-mono whitespace-nowrap pointer-events-none ${
-                ev.on ? 'text-emerald-400' : 'text-red-400'
-              }`}>
+              <div className={`absolute top-0 bottom-0 w-0.5 ${colors.line}`} />
+              <div className={`relative z-10 w-4 h-4 rounded-full border-2 shadow-lg ${colors.knob} ${draggingId === ev.id ? 'scale-125' : ''} transition-transform`} />
+              <span className={`absolute -bottom-0.5 text-[8px] font-mono whitespace-nowrap pointer-events-none ${colors.text}`}>
                 {ev.time}
               </span>
             </div>
@@ -863,29 +1037,33 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
         })}
       </div>
 
-      {/* Event list (compact) */}
-      {timeline.events.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-1">
-          {[...timeline.events]
-            .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
-            .map(ev => (
+      {/* Event chips + Add Event button */}
+      <div className="flex flex-wrap gap-1.5 mt-1">
+        {[...timeline.events]
+          .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
+          .map(ev => {
+            const colors = getEventColor(ev);
+            return (
               <button
                 key={ev.id}
                 onClick={() => setPopoverEvent(ev)}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono border transition-colors ${
-                  ev.on
-                    ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-400 hover:bg-emerald-900/40'
-                    : 'bg-red-950/40 border-red-800/50 text-red-400 hover:bg-red-900/40'
-                }`}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono border transition-colors ${colors.bg} ${colors.border} ${colors.text} hover:brightness-125`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${ev.on ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                {ev.time} {ev.on ? 'ON' : 'OFF'}
+                <span className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
+                {ev.time} {getEventLabel(ev)}
               </button>
-            ))}
-        </div>
-      )}
+            );
+          })}
+        <button
+          onClick={() => setShowAddEvent(true)}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] border border-dashed border-gray-700 text-gray-500 hover:text-blue-400 hover:border-blue-600 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          Add Event
+        </button>
+      </div>
 
-      {/* Event popover */}
+      {/* Event popover (edit existing) */}
       {popoverEvent && (
         <EventPopover
           event={popoverEvent}
@@ -894,6 +1072,16 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete }: {
           onUpdate={(updates) => updateEvent(popoverEvent.id, updates)}
           onDelete={() => deleteEvent(popoverEvent.id)}
           onClose={() => setPopoverEvent(null)}
+        />
+      )}
+
+      {/* Add Event sheet (create new) */}
+      {showAddEvent && (
+        <AddEventSheet
+          device={timeline.device}
+          allDevices={allDevices}
+          onAdd={addNewEvent}
+          onClose={() => setShowAddEvent(false)}
         />
       )}
     </div>
@@ -1084,6 +1272,7 @@ export default function ScheduleBuilder() {
         deviceId: device.id,
         deviceName: device.name.name,
         device,
+        groupId: group.id,
         events: [
           { id: uid(), time: startTime, on: true, command: { type: 'OnOff', on: true } },
           { id: uid(), time: endTime, on: false, command: { type: 'OnOff', on: false } },
@@ -1093,6 +1282,23 @@ export default function ScheduleBuilder() {
     if (newTimelines.length > 0) {
       setTimelines(prev => [...prev, ...newTimelines]);
     }
+  };
+
+  const syncGroup = (sourceTimeline: DeviceTimeline) => {
+    if (!sourceTimeline.groupId) return;
+    setTimelines(prev => prev.map(tl => {
+      if (tl.groupId === sourceTimeline.groupId && tl.deviceId !== sourceTimeline.deviceId) {
+        // Deep clone events with new IDs
+        const clonedEvents = sourceTimeline.events.map(ev => ({
+          ...ev,
+          id: uid(),
+          command: { ...ev.command } as DeviceCommand,
+          condition: ev.condition ? { ...ev.condition } : undefined,
+        }));
+        return { ...tl, events: clonedEvents };
+      }
+      return tl;
+    }));
   };
 
   const handleSave = async () => {
@@ -1252,6 +1458,7 @@ export default function ScheduleBuilder() {
                 onDelete={() => {
                   setTimelines(prev => prev.filter((_, i) => i !== idx));
                 }}
+                onSync={tl.groupId ? () => syncGroup(tl) : undefined}
               />
             ))}
           </div>
@@ -1273,7 +1480,7 @@ export default function ScheduleBuilder() {
 
           {timelines.length > 0 && (
             <p className="text-[10px] text-gray-700 text-center mt-2">
-              Tap the bar to add events &middot; Drag markers to adjust time &middot; Tap a marker or chip to edit
+              Drag markers to adjust time &middot; Tap a chip to edit
             </p>
           )}
         </div>
