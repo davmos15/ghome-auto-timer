@@ -12,13 +12,10 @@ import {
   Fan,
   Loader2,
   X,
-  ChevronUp,
-  ChevronDown,
-  Palette,
   Layers,
 } from 'lucide-react';
 import { scheduleApi, tuyaApi, groupApi } from '../lib/api';
-import type { Schedule, TimeSlot, DeviceAction, DayOfWeek, Device, DeviceCommand, DeviceGroup, ActionCondition } from '../types';
+import type { Schedule, TimeSlot, DayOfWeek, Device, DeviceCommand, DeviceGroup, ActionCondition } from '../types';
 import { PRESET_COLORS, getDeviceTypeShort, getDeviceDisplayName, AC_MODES, AC_FAN_SPEEDS } from '../types';
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -1001,7 +998,6 @@ export default function ScheduleBuilder() {
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAddDevice, setShowAddDevice] = useState(false);
-  const [timelinesLoaded, setTimelinesLoaded] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -1029,7 +1025,6 @@ export default function ScheduleBuilder() {
             setTimelines(timeSlotsToTimelines(existing.timeSlots, deviceList));
           }
         }
-        setTimelinesLoaded(true);
       } catch (err) {
         setError((err as Error).message);
       } finally {
