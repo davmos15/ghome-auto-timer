@@ -966,21 +966,9 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete, onSync }:
             {timeline.events.length} event{timeline.events.length !== 1 ? 's' : ''}
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          {onSync && (
-            <button
-              onClick={onSync}
-              className="flex items-center gap-1 px-2 py-1 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20 rounded transition-colors"
-              title="Copy this device's events to all other devices in the group"
-            >
-              <Copy className="h-3 w-3" />
-              <span className="text-[10px]">Sync</span>
-            </button>
-          )}
-          <button onClick={onDelete} className="p-1 text-gray-700 hover:text-red-500 transition-colors">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <button onClick={onDelete} className="p-1 text-gray-700 hover:text-red-500 transition-colors">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* Timeline bar */}
@@ -1037,30 +1025,46 @@ function DeviceTimelineRow({ timeline, allDevices, onUpdate, onDelete, onSync }:
         })}
       </div>
 
-      {/* Event chips + Add Event button */}
-      <div className="flex flex-wrap gap-1.5 mt-1">
-        {[...timeline.events]
-          .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
-          .map(ev => {
-            const colors = getEventColor(ev);
-            return (
-              <button
-                key={ev.id}
-                onClick={() => setPopoverEvent(ev)}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono border transition-colors ${colors.bg} ${colors.border} ${colors.text} hover:brightness-125`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
-                {ev.time} {getEventLabel(ev)}
-              </button>
-            );
-          })}
+      {/* Event chips */}
+      {timeline.events.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-1">
+          {[...timeline.events]
+            .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
+            .map(ev => {
+              const colors = getEventColor(ev);
+              return (
+                <button
+                  key={ev.id}
+                  onClick={() => setPopoverEvent(ev)}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono border transition-colors ${colors.bg} ${colors.border} ${colors.text} hover:brightness-125`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
+                  {ev.time} {getEventLabel(ev)}
+                </button>
+              );
+            })}
+        </div>
+      )}
+
+      {/* Add Event + Sync Group buttons */}
+      <div className="flex gap-2 mt-2">
         <button
           onClick={() => setShowAddEvent(true)}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] border border-dashed border-gray-700 text-gray-500 hover:text-blue-400 hover:border-blue-600 transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium border border-dashed border-gray-700 text-gray-400 hover:text-blue-400 hover:border-blue-500 active:scale-95 transition-all"
         >
-          <Plus className="h-3 w-3" />
+          <Plus className="h-4 w-4" />
           Add Event
         </button>
+        {onSync && (
+          <button
+            onClick={onSync}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border border-purple-800/50 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20 active:scale-95 transition-all"
+            title="Copy this device's events to all other devices in the group"
+          >
+            <Copy className="h-4 w-4" />
+            Sync Group
+          </button>
+        )}
       </div>
 
       {/* Event popover (edit existing) */}
